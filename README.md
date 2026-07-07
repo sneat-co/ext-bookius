@@ -1,6 +1,7 @@
-# bookius-contract
+# ext-bookius
 
-Public contract surface for **Bookius**, the Sneat ecosystem booking platform.
+Public extension-definition repo for **Bookius**, the Sneat ecosystem booking
+platform.
 
 Bookius owns booking types, public booking pages, bookings/reservations,
 booking lifecycle, confirmations and the public booking experience. It stays
@@ -17,4 +18,3 @@ Implementation repo: `sneat-co/bookius` (private by default).
 - `src/` — TypeScript DTOs and constants for frontend contracts.
 - `typespec/` — API shape sketch for public and space-scoped endpoints.
 - `backend/` — Go DTOs/constants for backend consumers.
-
