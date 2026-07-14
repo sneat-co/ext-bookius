@@ -16,5 +16,7 @@ jobs:
     with:
       working-directory: frontend
       ref: ${{ inputs.ref }}
-      publish-command: pnpm publish --no-git-checks --access public
+      install-command: pnpm install --no-frozen-lockfile
+      build-command: pnpm exec nx build ext-bookius-contract
+      publish-command: pnpm exec nx release publish --projects=ext-bookius-contract
     secrets: inherit

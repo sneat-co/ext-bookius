@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "release": {
+    "projects": ["ext-bookius-contract"],
+    "projectsRelationship": "independent"
+  }
+}
