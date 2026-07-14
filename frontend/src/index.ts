@@ -1,1 +1,2 @@
-export * from "./lib/bookius";
+export * from './dto';
+export * from './services';
