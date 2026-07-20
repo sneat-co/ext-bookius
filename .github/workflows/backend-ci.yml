@@ -1,0 +1,42 @@
+name: Bookius contract backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - .github/workflows/backend-ci.yml
+  pull_request:
+    paths:
+      - backend/**
+      - .github/workflows/backend-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  contract-coverage:
+    runs-on: ubuntu-latest
+    env:
+      # Contract validation is small but security-relevant. Keep this numeric
+      # floor non-decreasing as contract behavior grows.
+      MIN_CONTRACT_COVERAGE: "100.0"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+      - name: Enforce Bookius contract coverage floor
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./... -coverprofile=contract-coverage.out
+          coverage="$(go tool cover -func=contract-coverage.out | awk '/^total:/{gsub("%", "", $3); print $3}')"
+          awk -v actual="$coverage" -v minimum="$MIN_CONTRACT_COVERAGE" 'BEGIN {
+            if (actual + 0 < minimum + 0) {
+              printf "Bookius contract coverage %s%% is below the required %s%%\\n", actual, minimum
+              exit 1
+            }
+            printf "Bookius contract coverage %s%% meets the required %s%%\\n", actual, minimum
+          }'
