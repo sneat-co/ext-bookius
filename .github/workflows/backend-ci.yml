@@ -22,7 +22,7 @@ jobs:
       # floor non-decreasing as contract behavior grows.
       MIN_CONTRACT_COVERAGE: "100.0"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
