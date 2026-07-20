@@ -5,6 +5,7 @@ package botapp
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -32,6 +33,23 @@ type Invoice struct {
 	AmountCents  int64
 	Currency     string
 	Description  string
+}
+
+// Validate ensures that an invoice is safe for a delivery adapter to present
+// to a payer. Amounts and descriptions always originate server-side.
+func (i Invoice) Validate() error {
+	switch {
+	case i.CommitmentID == "":
+		return errors.New("bookius bot invoice: commitment ID is required")
+	case i.AmountCents <= 0:
+		return errors.New("bookius bot invoice: amount must be positive")
+	case i.Currency == "":
+		return errors.New("bookius bot invoice: currency is required")
+	case i.Description == "":
+		return errors.New("bookius bot invoice: description is required")
+	default:
+		return nil
+	}
 }
 
 // Settlement reports the delivery-relevant outcome of an idempotent payment
