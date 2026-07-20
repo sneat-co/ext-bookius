@@ -31,7 +31,7 @@
     "vitest": "^4.0.15"
   },
   "peerDependencies": {
-    "@angular/core": "^21.0.0",
+    "@angular/core": "^21.0.0 || ^22.0.0",
     "@sneat/dto": "^0.22.0",
     "rxjs": "^7.0.0"
   }
