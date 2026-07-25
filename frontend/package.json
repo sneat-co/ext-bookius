@@ -24,7 +24,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.0",
     "@nx/js": "22.7.5",
     "nx": "22.7.5",
     "vite": "^7.2.7",
