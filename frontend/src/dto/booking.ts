@@ -10,6 +10,7 @@ export type BookiusTargetKind =
   | 'equipment'
   | 'service'
   | 'event-session'
+  | 'competition-entry'
   | 'custom';
 
 export type BookiusConfirmationMode = 'automatic' | 'manual' | 'request';
@@ -141,6 +142,65 @@ export interface BookiusCreateBookingRequest {
   readonly visitorPhone?: string;
   readonly subject?: string;
   readonly message?: string;
+}
+
+export interface BookiusCompetitionEntryTarget {
+  readonly extensionID: string;
+  readonly eventID: string;
+  readonly tournamentID: string;
+  readonly competitionID: string;
+}
+
+/** No amount or currency: Bookius resolves the offer server-to-server. */
+export interface BookiusCompetitionEntryReservationRequest {
+  readonly requestID: string;
+  readonly target: BookiusCompetitionEntryTarget;
+  readonly participantReference: string;
+  readonly entryReference: string;
+}
+
+export type BookiusCompetitionEntryReservationState =
+  | 'requested'
+  | 'waitlisted'
+  | 'held'
+  | 'checkout-ready'
+  | 'confirmed'
+  | 'failed'
+  | 'expired'
+  | 'cancelled'
+  | 'refunded';
+
+export interface BookiusCompetitionEntryReservation {
+  readonly id: string;
+  readonly requestID: string;
+  readonly target: BookiusCompetitionEntryTarget;
+  readonly participantReference: string;
+  readonly entryReference: string;
+  readonly state: BookiusCompetitionEntryReservationState;
+  /** Server-authored hold terms. */
+  readonly amountMinor: number;
+  readonly currency: string;
+  readonly offerReference: string;
+  readonly offerVersion: number;
+  readonly offerChecksum: string;
+  readonly paymentState:
+    | 'free'
+    | 'not_started'
+    | 'checkout_open'
+    | 'paid'
+    | 'refund_pending'
+    | 'refunded'
+    | 'failed';
+  readonly expiresAt?: string;
+}
+
+export interface BookiusCompetitionEntrySettlementNotification {
+  readonly settlementID: string;
+  readonly reservationID: string;
+  readonly status: 'paid' | 'failed' | 'refunded';
+  readonly amountMinor: number;
+  readonly currency: string;
+  readonly occurredAt: string;
 }
 
 /**
