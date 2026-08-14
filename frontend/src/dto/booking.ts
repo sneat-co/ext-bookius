@@ -149,6 +149,7 @@ export interface BookiusCompetitionEntryTarget {
   readonly eventID: string;
   readonly tournamentID: string;
   readonly competitionID: string;
+  readonly targetVersion: number;
 }
 
 /** No amount or currency: Bookius resolves the offer server-to-server. */
@@ -176,6 +177,7 @@ export interface BookiusCompetitionEntryReservation {
   readonly target: BookiusCompetitionEntryTarget;
   readonly participantReference: string;
   readonly entryReference: string;
+  readonly bookingRevision: number;
   readonly state: BookiusCompetitionEntryReservationState;
   /** Server-authored hold terms. */
   readonly amountMinor: number;
@@ -191,17 +193,34 @@ export interface BookiusCompetitionEntryReservation {
     | 'refund_pending'
     | 'refunded'
     | 'failed';
+  readonly confirmationEvidence?: BookiusCompetitionEntryConfirmationEvidence;
+  readonly checkoutOperation: 'none' | 'pending' | 'ready' | 'failed';
+  readonly confirmationDelivery: BookiusCompetitionEntryDeliveryState;
+  readonly refundDelivery: BookiusCompetitionEntryDeliveryState;
   readonly expiresAt?: string;
 }
 
 export interface BookiusCompetitionEntrySettlementNotification {
   readonly settlementID: string;
+  readonly settlementReference: string;
+  readonly refundReference: string;
   readonly reservationID: string;
   readonly status: 'paid' | 'failed' | 'refunded';
   readonly amountMinor: number;
   readonly currency: string;
   readonly occurredAt: string;
 }
+
+export interface BookiusCompetitionEntryConfirmationEvidence {
+  readonly kind: 'free' | 'settled';
+  readonly settlementReference?: string;
+}
+
+export type BookiusCompetitionEntryDeliveryState =
+  | 'none'
+  | 'pending'
+  | 'delivered'
+  | 'failed';
 
 /**
  * Public booking-type shape retained from the initial standalone contract.
@@ -250,4 +269,37 @@ export interface BookiusBooking {
   readonly inviteeContactRef?: BookiusContactRef;
   readonly resourceRef?: BookiusExtensionRef;
   readonly calendarCommitmentRef?: BookiusAvailabilitySourceRef;
+}
+
+export interface BookiusCompetitionEntryLifecycleCommand {
+  readonly commandID: string;
+  readonly reservationID: string;
+}
+
+export type BookiusApproveCompetitionEntryReservationRequest =
+  BookiusCompetitionEntryLifecycleCommand;
+
+export type BookiusPromoteCompetitionEntryWaitlistRequest =
+  BookiusCompetitionEntryLifecycleCommand;
+
+export type BookiusExpireCompetitionEntryReservationRequest =
+  BookiusCompetitionEntryLifecycleCommand;
+
+export interface BookiusCancelCompetitionEntryReservationRequest
+  extends BookiusCompetitionEntryLifecycleCommand {
+  readonly origin: 'participant' | 'organiser';
+  readonly actorReference: string;
+  readonly authorityEvidence: string;
+  readonly reason: string;
+}
+
+export interface BookiusCompetitionEntryCancellationValidation {
+  readonly authorized: boolean;
+  /** False only for a locked participant cancellation without an organiser refund override. */
+  readonly refundAuthorized: boolean;
+  readonly currentTournamentVersion: number;
+  readonly registrationLocked: boolean;
+  readonly authoriserReference?: string;
+  readonly authorityEvidence: string;
+  readonly validatedAt: string;
 }

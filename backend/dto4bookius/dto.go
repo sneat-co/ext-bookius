@@ -91,6 +91,8 @@ type CompetitionEntryTarget struct {
 	EventID       string `json:"eventID"`
 	TournamentID  string `json:"tournamentID"`
 	CompetitionID string `json:"competitionID"`
+	// TargetVersion binds a booking to the immutable external target revision.
+	TargetVersion uint32 `json:"targetVersion"`
 }
 
 type ReservationState string
@@ -140,15 +142,41 @@ type CompetitionEntryReservation struct {
 	Target               CompetitionEntryTarget        `json:"target"`
 	ParticipantReference string                        `json:"participantReference"`
 	EntryReference       string                        `json:"entryReference"`
-	State                ReservationState              `json:"state"`
-	AmountMinor          int64                         `json:"amountMinor"`
-	Currency             string                        `json:"currency"`
-	OfferReference       string                        `json:"offerReference"`
-	OfferVersion         uint32                        `json:"offerVersion"`
-	OfferChecksum        string                        `json:"offerChecksum"`
-	PaymentState         CompetitionEntryPaymentState  `json:"paymentState"`
-	ExpiresAt            *time.Time                    `json:"expiresAt,omitempty"`
+	// BookingRevision advances for each authoritative Bookius state change.
+	BookingRevision uint32                       `json:"bookingRevision"`
+	State           ReservationState             `json:"state"`
+	AmountMinor     int64                        `json:"amountMinor"`
+	Currency        string                       `json:"currency"`
+	OfferReference  string                       `json:"offerReference"`
+	OfferVersion    uint32                       `json:"offerVersion"`
+	OfferChecksum   string                       `json:"offerChecksum"`
+	PaymentState    CompetitionEntryPaymentState `json:"paymentState"`
+	// ConfirmationEvidence is populated only when Bookius confirms the entry.
+	// It makes a zero-price free confirmation distinguishable from a payment.
+	ConfirmationEvidence CompetitionEntryConfirmationEvidence   `json:"confirmationEvidence,omitempty"`
+	CheckoutOperation    CompetitionEntryCheckoutOperationState `json:"checkoutOperation"`
+	ConfirmationDelivery CompetitionEntryDeliveryState          `json:"confirmationDelivery"`
+	RefundDelivery       CompetitionEntryDeliveryState          `json:"refundDelivery"`
+	ExpiresAt            *time.Time                             `json:"expiresAt,omitempty"`
 }
+
+type CompetitionEntryCheckoutOperationState string
+
+const (
+	CompetitionEntryCheckoutNone    CompetitionEntryCheckoutOperationState = "none"
+	CompetitionEntryCheckoutPending CompetitionEntryCheckoutOperationState = "pending"
+	CompetitionEntryCheckoutReady   CompetitionEntryCheckoutOperationState = "ready"
+	CompetitionEntryCheckoutFailed  CompetitionEntryCheckoutOperationState = "failed"
+)
+
+type CompetitionEntryDeliveryState string
+
+const (
+	CompetitionEntryDeliveryNone      CompetitionEntryDeliveryState = "none"
+	CompetitionEntryDeliveryPending   CompetitionEntryDeliveryState = "pending"
+	CompetitionEntryDeliveryDelivered CompetitionEntryDeliveryState = "delivered"
+	CompetitionEntryDeliveryFailed    CompetitionEntryDeliveryState = "failed"
+)
 
 type CheckoutProjection struct {
 	CheckoutID    CheckoutID                    `json:"checkoutID"`
@@ -170,12 +198,94 @@ const (
 // the held amount/currency so Bookius can fail closed on a mismatched payment;
 // it is never browser-supplied input.
 type SettlementNotification struct {
-	SettlementID  SettlementID                  `json:"settlementID"`
+	SettlementID SettlementID `json:"settlementID"`
+	// SettlementReference is the verified provider payment reference. It is
+	// distinct from SettlementID, which only deduplicates webhook delivery.
+	SettlementReference string `json:"settlementReference"`
+	// RefundReference is the provider's opaque reversal handle. It can differ
+	// from the checkout/settlement reference (for example Stripe Session vs
+	// PaymentIntent) and is never used as payment-confirmation evidence.
+	RefundReference string                        `json:"refundReference"`
+	ReservationID   CompetitionEntryReservationID `json:"reservationID"`
+	Status          SettlementStatus              `json:"status"`
+	AmountMinor     int64                         `json:"amountMinor"`
+	Currency        string                        `json:"currency"`
+	OccurredAt      time.Time                     `json:"occurredAt"`
+}
+
+type CompetitionEntryConfirmationEvidenceKind string
+
+const (
+	CompetitionEntryConfirmationEvidenceFree    CompetitionEntryConfirmationEvidenceKind = "free"
+	CompetitionEntryConfirmationEvidenceSettled CompetitionEntryConfirmationEvidenceKind = "settled"
+)
+
+// CompetitionEntryConfirmationEvidence is forwarded to the external Entry
+// confirmation consumer. Free and settled confirmations are deliberately
+// mutually exclusive, so a zero price is never mistaken for a missing payment.
+type CompetitionEntryConfirmationEvidence struct {
+	Kind                CompetitionEntryConfirmationEvidenceKind `json:"kind"`
+	SettlementReference string                                   `json:"settlementReference,omitempty"`
+}
+
+// ApproveCompetitionEntryReservationRequest is an organiser command. Approval
+// is deliberately separate from checkout: implementations create the hold
+// first and only then may expose a payment link.
+type ApproveCompetitionEntryReservationRequest struct {
+	CommandID     string                        `json:"commandID"`
 	ReservationID CompetitionEntryReservationID `json:"reservationID"`
-	Status        SettlementStatus              `json:"status"`
-	AmountMinor   int64                         `json:"amountMinor"`
-	Currency      string                        `json:"currency"`
-	OccurredAt    time.Time                     `json:"occurredAt"`
+}
+
+// PromoteCompetitionEntryWaitlistRequest moves one existing waitlist record
+// through the same approval/hold path. It never authorises a charge itself.
+type PromoteCompetitionEntryWaitlistRequest struct {
+	CommandID     string                        `json:"commandID"`
+	ReservationID CompetitionEntryReservationID `json:"reservationID"`
+}
+
+// ExpireCompetitionEntryReservationRequest is the durable expiry command used
+// by a scheduler. A replay is safe; an implementation must never expire an
+// already confirmed booking.
+type ExpireCompetitionEntryReservationRequest struct {
+	CommandID     string                        `json:"commandID"`
+	ReservationID CompetitionEntryReservationID `json:"reservationID"`
+}
+
+type CompetitionEntryCancellationOrigin string
+
+const (
+	CompetitionEntryCancellationParticipant CompetitionEntryCancellationOrigin = "participant"
+	CompetitionEntryCancellationOrganiser   CompetitionEntryCancellationOrigin = "organiser"
+)
+
+// CancelCompetitionEntryReservationRequest is authenticated command evidence.
+// AuthorityEvidence is minted by the protected delivery adapter; it is not a
+// browser assertion. Current lock state is intentionally absent and must be
+// resolved through CompetitionEntryCancellationValidator at command time.
+type CancelCompetitionEntryReservationRequest struct {
+	CommandID         string                             `json:"commandID"`
+	ReservationID     CompetitionEntryReservationID      `json:"reservationID"`
+	Origin            CompetitionEntryCancellationOrigin `json:"origin"`
+	ActorReference    string                             `json:"actorReference"`
+	AuthorityEvidence string                             `json:"authorityEvidence"`
+	Reason            string                             `json:"reason"`
+}
+
+// CompetitionEntryCancellationValidation is trusted server-to-server output
+// from the target owner. It binds the decision to the current Tournament
+// version/lock state and records who authorised an organiser override.
+type CompetitionEntryCancellationValidation struct {
+	Authorized               bool      `json:"authorized"`
+	RefundAuthorized         bool      `json:"refundAuthorized"`
+	CurrentTournamentVersion uint32    `json:"currentTournamentVersion"`
+	RegistrationLocked       bool      `json:"registrationLocked"`
+	AuthoriserReference      string    `json:"authoriserReference,omitempty"`
+	AuthorityEvidence        string    `json:"authorityEvidence"`
+	ValidatedAt              time.Time `json:"validatedAt"`
+}
+
+type CompetitionEntryCancellationValidator interface {
+	ValidateCompetitionEntryCancellation(context.Context, CompetitionEntryReservation, CancelCompetitionEntryReservationRequest) (CompetitionEntryCancellationValidation, error)
 }
 
 func ValidateCompetitionEntryReservationRequest(value CompetitionEntryReservationRequest) error {
@@ -186,7 +296,7 @@ func ValidateCompetitionEntryReservationRequest(value CompetitionEntryReservatio
 }
 
 func ValidateCompetitionEntryReservation(value CompetitionEntryReservation) error {
-	if value.ID == "" || strings.TrimSpace(value.RequestID) == "" || !validCompetitionEntryTarget(value.Target) || strings.TrimSpace(value.ParticipantReference) == "" || strings.TrimSpace(value.EntryReference) == "" || value.AmountMinor < 0 || !validISOCurrency(value.Currency) || strings.TrimSpace(value.OfferReference) == "" || value.OfferVersion == 0 || !validSHA256Checksum(value.OfferChecksum) {
+	if value.ID == "" || strings.TrimSpace(value.RequestID) == "" || !validCompetitionEntryTarget(value.Target) || strings.TrimSpace(value.ParticipantReference) == "" || strings.TrimSpace(value.EntryReference) == "" || value.BookingRevision == 0 || value.AmountMinor < 0 || !validISOCurrency(value.Currency) || strings.TrimSpace(value.OfferReference) == "" || value.OfferVersion == 0 || !validSHA256Checksum(value.OfferChecksum) {
 		return ErrInvalidCompetitionEntry
 	}
 	switch value.State {
@@ -202,11 +312,26 @@ func ValidateCompetitionEntryReservation(value CompetitionEntryReservation) erro
 	default:
 		return ErrInvalidCompetitionEntry
 	}
+	switch value.CheckoutOperation {
+	case CompetitionEntryCheckoutNone, CompetitionEntryCheckoutPending, CompetitionEntryCheckoutReady, CompetitionEntryCheckoutFailed:
+	default:
+		return ErrInvalidCompetitionEntry
+	}
+	for _, delivery := range []CompetitionEntryDeliveryState{value.ConfirmationDelivery, value.RefundDelivery} {
+		switch delivery {
+		case CompetitionEntryDeliveryNone, CompetitionEntryDeliveryPending, CompetitionEntryDeliveryDelivered, CompetitionEntryDeliveryFailed:
+		default:
+			return ErrInvalidCompetitionEntry
+		}
+	}
+	if value.State == ReservationConfirmed && !validCompetitionEntryConfirmationEvidence(value.ConfirmationEvidence, value.AmountMinor) {
+		return ErrInvalidCompetitionEntry
+	}
 	return nil
 }
 
 func ValidateSettlementNotification(value SettlementNotification) error {
-	if value.SettlementID == "" || value.ReservationID == "" || value.AmountMinor < 0 || !validISOCurrency(value.Currency) || value.OccurredAt.IsZero() {
+	if value.SettlementID == "" || strings.TrimSpace(value.SettlementReference) == "" || strings.TrimSpace(value.RefundReference) == "" || value.ReservationID == "" || value.AmountMinor < 0 || !validISOCurrency(value.Currency) || value.OccurredAt.IsZero() {
 		return ErrInvalidCompetitionEntry
 	}
 	switch value.Status {
@@ -217,8 +342,74 @@ func ValidateSettlementNotification(value SettlementNotification) error {
 	}
 }
 
+func ValidateApproveCompetitionEntryReservationRequest(value ApproveCompetitionEntryReservationRequest) error {
+	if strings.TrimSpace(value.CommandID) == "" || value.ReservationID == "" {
+		return ErrInvalidCompetitionEntry
+	}
+	return nil
+}
+
+func ValidatePromoteCompetitionEntryWaitlistRequest(value PromoteCompetitionEntryWaitlistRequest) error {
+	if strings.TrimSpace(value.CommandID) == "" || value.ReservationID == "" {
+		return ErrInvalidCompetitionEntry
+	}
+	return nil
+}
+
+func ValidateExpireCompetitionEntryReservationRequest(value ExpireCompetitionEntryReservationRequest) error {
+	if strings.TrimSpace(value.CommandID) == "" || value.ReservationID == "" {
+		return ErrInvalidCompetitionEntry
+	}
+	return nil
+}
+
+func ValidateCancelCompetitionEntryReservationRequest(value CancelCompetitionEntryReservationRequest) error {
+	if strings.TrimSpace(value.CommandID) == "" || value.ReservationID == "" || strings.TrimSpace(value.ActorReference) == "" || strings.TrimSpace(value.AuthorityEvidence) == "" || strings.TrimSpace(value.Reason) == "" {
+		return ErrInvalidCompetitionEntry
+	}
+	switch value.Origin {
+	case CompetitionEntryCancellationParticipant, CompetitionEntryCancellationOrganiser:
+		return nil
+	default:
+		return ErrInvalidCompetitionEntry
+	}
+}
+
+func ValidateCompetitionEntryCancellationValidation(value CompetitionEntryCancellationValidation, origin CompetitionEntryCancellationOrigin) error {
+	if !value.Authorized || value.CurrentTournamentVersion == 0 || strings.TrimSpace(value.AuthorityEvidence) == "" || value.ValidatedAt.IsZero() {
+		return ErrInvalidCompetitionEntry
+	}
+	switch origin {
+	case CompetitionEntryCancellationOrganiser:
+		if !value.RefundAuthorized {
+			return ErrInvalidCompetitionEntry
+		}
+	case CompetitionEntryCancellationParticipant:
+		if !value.RegistrationLocked && !value.RefundAuthorized {
+			return ErrInvalidCompetitionEntry
+		}
+		if value.RegistrationLocked && value.RefundAuthorized && strings.TrimSpace(value.AuthoriserReference) == "" {
+			return ErrInvalidCompetitionEntry
+		}
+	default:
+		return ErrInvalidCompetitionEntry
+	}
+	return nil
+}
+
 func validCompetitionEntryTarget(value CompetitionEntryTarget) bool {
-	return value.ExtensionID != "" && value.EventID != "" && value.TournamentID != "" && value.CompetitionID != ""
+	return value.ExtensionID != "" && value.EventID != "" && value.TournamentID != "" && value.CompetitionID != "" && value.TargetVersion > 0
+}
+
+func validCompetitionEntryConfirmationEvidence(value CompetitionEntryConfirmationEvidence, amountMinor int64) bool {
+	switch value.Kind {
+	case CompetitionEntryConfirmationEvidenceFree:
+		return amountMinor == 0 && value.SettlementReference == ""
+	case CompetitionEntryConfirmationEvidenceSettled:
+		return amountMinor > 0 && strings.TrimSpace(value.SettlementReference) != ""
+	default:
+		return false
+	}
 }
 
 func validISOCurrency(value string) bool {
@@ -251,7 +442,10 @@ func validSHA256Checksum(value string) bool {
 // Implementations must deduplicate request IDs and settlement IDs.
 type CompetitionEntryReservations interface {
 	ReserveCompetitionEntry(context.Context, CompetitionEntryReservationRequest) (CompetitionEntryReservation, error)
+	ApproveCompetitionEntryReservation(context.Context, ApproveCompetitionEntryReservationRequest) (CompetitionEntryReservation, error)
+	PromoteCompetitionEntryWaitlist(context.Context, PromoteCompetitionEntryWaitlistRequest) (CompetitionEntryReservation, error)
 	BeginCompetitionEntryCheckout(context.Context, CompetitionEntryReservationID) (CheckoutProjection, error)
 	RecordCompetitionEntrySettlement(context.Context, SettlementNotification) (CompetitionEntryReservation, error)
-	CancelCompetitionEntryReservation(context.Context, CompetitionEntryReservationID, string) (CompetitionEntryReservation, error)
+	ExpireCompetitionEntryReservation(context.Context, ExpireCompetitionEntryReservationRequest) (CompetitionEntryReservation, error)
+	CancelCompetitionEntryReservation(context.Context, CancelCompetitionEntryReservationRequest) (CompetitionEntryReservation, error)
 }
